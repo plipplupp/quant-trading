@@ -42,6 +42,7 @@ def _train_single_model(model_type, df, features, target_col):
     
     common_xgb_params = {
         'random_state': TrainingConfig.RANDOM_STATE,
+        'tree_method': "gpu_hist" if TrainingConfig.USE_GPU else "hist",
         'device': "cuda" if TrainingConfig.USE_GPU else "cpu"
     }
 
