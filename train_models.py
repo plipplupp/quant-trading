@@ -4,9 +4,81 @@ import joblib
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import r2_score, accuracy_score, mean_squared_error, root_mean_squared_error
+from sklearn.metrics import r2_score, accuracy_score, root_mean_squared_error
 from xgboost import XGBRegressor, XGBClassifier
 from config import PathsConfig, TrainingConfig
+
+def _train_single_model(model_type, df, features, target_col):
+    """
+    Hjälpfunktion för att träna en enskild modell (Regression, Binary, eller Ranking).
+    Denna funktion innehåller all logik som tidigare upprepades.
+    """
+    print(f"\n=== Tränar {model_type}-modell ===")
+    
+    # 1. Förbered data
+    df_model = df.dropna(subset=[target_col])
+    X, y = df_model[features], df_model[target_col]
+
+    split_idx = int(len(X) * 0.8)
+    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+    
+    # 2. Definiera modell och pipeline
+    is_classifier = model_type == 'Binary'
+    
+    ### FIX: Ändra tree_method till 'gpu_hist' för att aktivera den optimerade GPU-algoritmen
+    common_xgb_params = {
+        'random_state': TrainingConfig.RANDOM_STATE,
+        'tree_method': "gpu_hist" if TrainingConfig.USE_GPU else "hist",
+        'device': "cuda" if TrainingConfig.USE_GPU else "cpu"
+    }
+
+    if is_classifier:
+        model = XGBClassifier(**common_xgb_params, eval_metric='logloss', use_label_encoder=False)
+    else:
+        model = XGBRegressor(**common_xgb_params)
+
+    pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('model', model)
+    ])
+
+    # 3. Definiera sök-parametrar och kör RandomizedSearchCV
+    param_grid = {
+        'model__n_estimators': [100, 200, 300, 500],
+        'model__max_depth': [3, 5, 7, 9],
+        'model__learning_rate': [0.01, 0.05, 0.1, 0.2],
+        'model__subsample': [0.7, 0.8, 0.9, 1.0],
+        'model__colsample_bytree': [0.7, 0.8, 0.9, 1.0] # Ny parameter att testa
+    }
+
+    tscv = TimeSeriesSplit(n_splits=TrainingConfig.CV_SPLITS)
+    
+    search = RandomizedSearchCV(
+        pipeline, param_grid,
+        n_iter=TrainingConfig.RANDOM_SEARCH_ITERS,
+        cv=tscv,
+        n_jobs=TrainingConfig.N_JOBS,
+        scoring='r2' if not is_classifier else 'accuracy',
+        verbose=1
+    )
+    search.fit(X_train, y_train)
+
+    # 4. Utvärdera och spara bästa modellen
+    y_pred = search.predict(X_test)
+    
+    if is_classifier:
+        score = accuracy_score(y_test, y_pred)
+        print(f"{model_type} Accuracy (holdout): {score:.3f}")
+    else:
+        r2 = r2_score(y_test, y_pred)
+        rmse = root_mean_squared_error(y_test, y_pred)
+        print(f"{model_type} R² (holdout): {r2:.3f}")
+        print(f"{model_type} RMSE (holdout): {rmse:.4f}")
+
+    model_filename = f"model_{model_type.lower()}.pkl"
+    joblib.dump(search.best_estimator_, os.path.join(PathsConfig.MODELS_DIR, model_filename))
+    print(f"✅ Sparade {model_type}-modell")
 
 
 def train_models():
@@ -20,154 +92,14 @@ def train_models():
 
     df = pd.read_parquet(data_path)
 
-    features = [c for c in df.columns if c not in [
-        'date', 'ticker',
-        'target_regression', 'target_binary', 'target_rank'
-    ]]
+    features = [c for c in df.columns if c.startswith('feature_')]
 
     os.makedirs(PathsConfig.MODELS_DIR, exist_ok=True)
-
-    # --- Gemensam tidsserie-split ---
-    tscv = TimeSeriesSplit(n_splits=TrainingConfig.CV_SPLITS)
-
-    # =========================================================
-    # Regression
-    # =========================================================
-    print("\n=== Tränar Regression-modell ===")
-    df_reg = df.dropna(subset=['target_regression'])
-    X, y = df_reg[features], df_reg['target_regression']
-
-    split_idx = int(len(X) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-
-    model_reg = XGBRegressor(
-        random_state=TrainingConfig.RANDOM_STATE,
-        tree_method="hist",
-        device="cuda" if TrainingConfig.USE_GPU else "cpu"
-    )
-
-    pipe_reg = Pipeline([
-        ('scaler', StandardScaler()),
-        ('model', model_reg)
-    ])
-
-    param_grid_reg = {
-        'model__n_estimators': [100, 200, 300],
-        'model__max_depth': [3, 5, 7],
-        'model__learning_rate': [0.01, 0.05, 0.1],
-        'model__subsample': [0.7, 0.9, 1.0]
-    }
-
-    search_reg = RandomizedSearchCV(
-        pipe_reg, param_grid_reg,
-        n_iter=TrainingConfig.RANDOM_SEARCH_ITERS,
-        cv=tscv,
-        n_jobs=TrainingConfig.N_JOBS,
-        scoring='r2', verbose=1
-    )
-    search_reg.fit(X_train, y_train)
-
-    y_pred = search_reg.predict(X_test)
-    print(f"Regression R² (holdout): {r2_score(y_test, y_pred):.3f}")
-    print(f"Regression RMSE (holdout): {root_mean_squared_error(y_test, y_pred):.4f}")
-
-    joblib.dump(search_reg.best_estimator_,
-                os.path.join(PathsConfig.MODELS_DIR, "model_regression.pkl"))
-    print("✅ Sparade regression-modell")
-
-    # =========================================================
-    # Binary
-    # =========================================================
-    print("\n=== Tränar Binary-modell ===")
-    df_bin = df.dropna(subset=['target_binary'])
-    X, y = df_bin[features], df_bin['target_binary']
-
-    split_idx = int(len(X) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-
-    model_bin = XGBClassifier(
-        use_label_encoder=False,
-        eval_metric='logloss',
-        random_state=TrainingConfig.RANDOM_STATE,
-        tree_method="hist",
-        device="cuda" if TrainingConfig.USE_GPU else "cpu"
-    )
-
-    pipe_bin = Pipeline([
-        ('scaler', StandardScaler()),
-        ('model', model_bin)
-    ])
-
-    param_grid_bin = {
-        'model__n_estimators': [100, 200, 300],
-        'model__max_depth': [3, 5, 7],
-        'model__learning_rate': [0.01, 0.05, 0.1],
-        'model__subsample': [0.7, 0.9, 1.0]
-    }
-
-    search_bin = RandomizedSearchCV(
-        pipe_bin, param_grid_bin,
-        n_iter=TrainingConfig.RANDOM_SEARCH_ITERS,
-        cv=tscv,
-        n_jobs=TrainingConfig.N_JOBS,
-        scoring='accuracy', verbose=1
-    )
-    search_bin.fit(X_train, y_train)
-
-    y_pred = search_bin.predict(X_test)
-    print(f"Binary Accuracy (holdout): {accuracy_score(y_test, y_pred):.3f}")
-
-    joblib.dump(search_bin.best_estimator_,
-                os.path.join(PathsConfig.MODELS_DIR, "model_binary.pkl"))
-    print("✅ Sparade binary-modell")
-
-    # =========================================================
-    # Ranking (Regression för avkastning)
-    # =========================================================
-    print("\n=== Tränar Ranking-modell ===")
-    df_rank = df.dropna(subset=['target_rank'])
-    X, y = df_rank[features], df_rank['target_rank']
-
-    split_idx = int(len(X) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-
-    model_rank = XGBRegressor(
-        random_state=TrainingConfig.RANDOM_STATE,
-        tree_method="hist",
-        device="cuda" if TrainingConfig.USE_GPU else "cpu"
-    )
-
-    pipe_rank = Pipeline([
-        ('scaler', StandardScaler()),
-        ('model', model_rank)
-    ])
-
-    param_grid_rank = {
-        'model__n_estimators': [100, 200, 300],
-        'model__max_depth': [3, 5, 7],
-        'model__learning_rate': [0.01, 0.05, 0.1],
-        'model__subsample': [0.7, 0.9, 1.0]
-    }
-
-    search_rank = RandomizedSearchCV(
-        pipe_rank, param_grid_rank,
-        n_iter=TrainingConfig.RANDOM_SEARCH_ITERS,
-        cv=tscv,
-        n_jobs=TrainingConfig.N_JOBS,
-        scoring='r2', verbose=1
-    )
-    search_rank.fit(X_train, y_train)
-
-    y_pred = search_rank.predict(X_test)
-    print(f"Ranking R² (holdout): {r2_score(y_test, y_pred):.3f}")
-    print(f"Ranking RMSE (holdout): {root_mean_squared_error(y_test, y_pred):.4f}")
-
-    joblib.dump(search_rank.best_estimator_,
-                os.path.join(PathsConfig.MODELS_DIR, "model_ranking.pkl"))
-    print("✅ Sparade ranking-modell")
+    
+    # Anropa hjälpfunktionen för varje modell
+    _train_single_model('Regression', df, features, 'target_regression')
+    _train_single_model('Binary', df, features, 'target_binary')
+    _train_single_model('Ranking', df, features, 'target_rank')
 
 
 if __name__ == "__main__":
