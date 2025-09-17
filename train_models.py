@@ -41,12 +41,15 @@ def train_models():
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
+    model_reg = XGBRegressor(
+        random_state=TrainingConfig.RANDOM_STATE,
+        tree_method="hist",
+        device="cuda" if TrainingConfig.USE_GPU else "cpu"
+    )
+
     pipe_reg = Pipeline([
         ('scaler', StandardScaler()),
-        ('model', XGBRegressor(
-            random_state=TrainingConfig.RANDOM_STATE,
-            device_to_use="cuda" if TrainingConfig.USE_GPU else "cpu"
-        ))
+        ('model', model_reg)
     ])
 
     param_grid_reg = {
@@ -67,7 +70,7 @@ def train_models():
 
     y_pred = search_reg.predict(X_test)
     print(f"Regression R² (holdout): {r2_score(y_test, y_pred):.3f}")
-    print(f"Regression RMSE (holdout): {mean_squared_error(y_test, y_pred, squared=False):.4f}")
+    print(f"Regression RMSE (holdout): {root_mean_squared_error(y_test, y_pred):.4f}")
 
     joblib.dump(search_reg.best_estimator_,
                 os.path.join(PathsConfig.MODELS_DIR, "model_regression.pkl"))
@@ -84,14 +87,17 @@ def train_models():
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
+    model_bin = XGBClassifier(
+        use_label_encoder=False,
+        eval_metric='logloss',
+        random_state=TrainingConfig.RANDOM_STATE,
+        tree_method="hist",
+        device="cuda" if TrainingConfig.USE_GPU else "cpu"
+    )
+
     pipe_bin = Pipeline([
         ('scaler', StandardScaler()),
-        ('model', XGBClassifier(
-            use_label_encoder=False,
-            eval_metric='logloss',
-            random_state=TrainingConfig.RANDOM_STATE,
-            device_to_use="cuda" if TrainingConfig.USE_GPU else "cpu"
-        ))
+        ('model', model_bin)
     ])
 
     param_grid_bin = {
@@ -128,12 +134,15 @@ def train_models():
     X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
     y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
 
+    model_rank = XGBRegressor(
+        random_state=TrainingConfig.RANDOM_STATE,
+        tree_method="hist",
+        device="cuda" if TrainingConfig.USE_GPU else "cpu"
+    )
+
     pipe_rank = Pipeline([
         ('scaler', StandardScaler()),
-        ('model', XGBRegressor(
-            random_state=TrainingConfig.RANDOM_STATE,
-            device_to_use="cuda" if TrainingConfig.USE_GPU else "cpu"
-        ))
+        ('model', model_rank)
     ])
 
     param_grid_rank = {
@@ -154,7 +163,7 @@ def train_models():
 
     y_pred = search_rank.predict(X_test)
     print(f"Ranking R² (holdout): {r2_score(y_test, y_pred):.3f}")
-    print(f"Ranking RMSE (holdout): {root_mean_squared_error(y_test, y_pred, squared=False):.4f}")
+    print(f"Ranking RMSE (holdout): {root_mean_squared_error(y_test, y_pred):.4f}")
 
     joblib.dump(search_rank.best_estimator_,
                 os.path.join(PathsConfig.MODELS_DIR, "model_ranking.pkl"))
