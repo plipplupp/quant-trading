@@ -8,77 +8,82 @@ from sklearn.metrics import r2_score, accuracy_score, root_mean_squared_error
 from xgboost import XGBRegressor, XGBClassifier
 from config import PathsConfig, TrainingConfig
 
-def _train_single_model(model_type, df, features, target_col):
+def _train_single_model(model_type, X_train, y_train, X_test, y_test):
     """
-    Hjälpfunktion för att träna en enskild modell (Regression, Binary, eller Ranking).
-    Denna funktion innehåller all logik som tidigare upprepades.
+    En hjälpfunktion för att träna, utvärdera och spara en enskild modell.
+    Detta minskar kodrepetition.
     """
     print(f"\n=== Tränar {model_type}-modell ===")
-    
-    # 1. Förbered data
-    df_model = df.dropna(subset=[target_col])
-    X, y = df_model[features], df_model[target_col]
 
-    split_idx = int(len(X) * 0.8)
-    X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-    y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-    
-    # 2. Definiera modell och pipeline
-    is_classifier = model_type == 'Binary'
-    
-    ### FIX: Ändra tree_method till 'gpu_hist' för att aktivera den optimerade GPU-algoritmen
-    common_xgb_params = {
-        'random_state': TrainingConfig.RANDOM_STATE,
-        'tree_method': "gpu_hist" if TrainingConfig.USE_GPU else "hist",
-        'device': "cuda" if TrainingConfig.USE_GPU else "cpu"
-    }
-
-    if is_classifier:
-        model = XGBClassifier(**common_xgb_params, eval_metric='logloss', use_label_encoder=False)
+    # Välj modell och hyperparametrar baserat på typ
+    if model_type in ['Regression', 'Ranking']:
+        model = XGBRegressor(
+            random_state=TrainingConfig.RANDOM_STATE,
+            tree_method="hist",
+            device="cuda" if TrainingConfig.USE_GPU else "cpu"
+        )
+        scoring = 'r2'
+        param_grid = {
+            'model__n_estimators': [100, 200, 300, 500],
+            'model__max_depth': [3, 5, 7, 9],
+            'model__learning_rate': [0.01, 0.05, 0.1],
+            'model__subsample': [0.7, 0.9, 1.0],
+            'model__colsample_bytree': [0.7, 0.9, 1.0]
+        }
+    elif model_type == 'Binary':
+        model = XGBClassifier(
+            use_label_encoder=False,
+            eval_metric='logloss',
+            random_state=TrainingConfig.RANDOM_STATE,
+            tree_method="hist",
+            device="cuda" if TrainingConfig.USE_GPU else "cpu"
+        )
+        scoring = 'accuracy'
+        # Använder samma grid som regression för enkelhetens skull, kan anpassas
+        param_grid = {
+            'model__n_estimators': [100, 200, 300, 500],
+            'model__max_depth': [3, 5, 7, 9],
+            'model__learning_rate': [0.01, 0.05, 0.1],
+            'model__subsample': [0.7, 0.9, 1.0],
+            'model__colsample_bytree': [0.7, 0.9, 1.0]
+        }
     else:
-        model = XGBRegressor(**common_xgb_params)
+        raise ValueError("Okänd modelltyp")
 
+    # Skapa pipeline och tidsserie-split
     pipeline = Pipeline([
         ('scaler', StandardScaler()),
         ('model', model)
     ])
-
-    # 3. Definiera sök-parametrar och kör RandomizedSearchCV
-    param_grid = {
-        'model__n_estimators': [100, 200, 300, 500],
-        'model__max_depth': [3, 5, 7, 9],
-        'model__learning_rate': [0.01, 0.05, 0.1, 0.2],
-        'model__subsample': [0.7, 0.8, 0.9, 1.0],
-        'model__colsample_bytree': [0.7, 0.8, 0.9, 1.0] # Ny parameter att testa
-    }
-
     tscv = TimeSeriesSplit(n_splits=TrainingConfig.CV_SPLITS)
-    
+
+    # Kör RandomizedSearchCV
     search = RandomizedSearchCV(
         pipeline, param_grid,
         n_iter=TrainingConfig.RANDOM_SEARCH_ITERS,
         cv=tscv,
         n_jobs=TrainingConfig.N_JOBS,
-        scoring='r2' if not is_classifier else 'accuracy',
-        verbose=1
+        scoring=scoring,
+        verbose=1,
+        random_state=TrainingConfig.RANDOM_STATE
     )
     search.fit(X_train, y_train)
 
-    # 4. Utvärdera och spara bästa modellen
+    # Utvärdera på holdout-set och skriv ut resultat
     y_pred = search.predict(X_test)
-    
-    if is_classifier:
-        score = accuracy_score(y_test, y_pred)
-        print(f"{model_type} Accuracy (holdout): {score:.3f}")
-    else:
+    if model_type in ['Regression', 'Ranking']:
         r2 = r2_score(y_test, y_pred)
         rmse = root_mean_squared_error(y_test, y_pred)
         print(f"{model_type} R² (holdout): {r2:.3f}")
         print(f"{model_type} RMSE (holdout): {rmse:.4f}")
+    elif model_type == 'Binary':
+        accuracy = accuracy_score(y_test, y_pred)
+        print(f"{model_type} Accuracy (holdout): {accuracy:.3f}")
 
+    # Spara den bästa modellen
     model_filename = f"model_{model_type.lower()}.pkl"
     joblib.dump(search.best_estimator_, os.path.join(PathsConfig.MODELS_DIR, model_filename))
-    print(f"✅ Sparade {model_type}-modell")
+    print(f"✅ Sparade {model_type.lower()}-modell")
 
 
 def train_models():
@@ -87,19 +92,56 @@ def train_models():
     # --- Läs in data ---
     data_path = os.path.join(PathsConfig.TARGETS_DIR, "stocks_with_targets.parquet")
     if not os.path.exists(data_path):
-        print("Fel: Kör generate_targets först.")
+        print(f"Fel: Filen {data_path} hittades inte. Kör generate_targets först.")
         return
 
     df = pd.read_parquet(data_path)
 
+    # Definiera vilka kolumner som är features
     features = [c for c in df.columns if c.startswith('feature_')]
-
-    os.makedirs(PathsConfig.MODELS_DIR, exist_ok=True)
     
-    # Anropa hjälpfunktionen för varje modell
-    _train_single_model('Regression', df, features, 'target_regression')
-    _train_single_model('Binary', df, features, 'target_binary')
-    _train_single_model('Ranking', df, features, 'target_rank')
+    # Säkerställ att mappen för modeller finns
+    os.makedirs(PathsConfig.MODELS_DIR, exist_ok=True)
+
+    # --- Modellträning ---
+    # Notera den KORREKTA ordningen:
+    # 1. Välj target och rensa bort NaN-värden.
+    # 2. Definiera X och y FRÅN DEN RENA DATAN.
+    # 3. Dela upp X och y i train/test.
+    # 4. Skicka den färdigdelade datan till hjälpfunktionen.
+
+    # Regression
+    df_reg = df.dropna(subset=['target_regression'])
+    if not df_reg.empty:
+        X, y = df_reg[features], df_reg['target_regression']
+        split_idx = int(len(X) * TrainingConfig.TRAIN_SPLIT_RATIO)
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        _train_single_model('Regression', X_train, y_train, X_test, y_test)
+    else:
+        print("\nSkippar Regression-modell: Ingen data efter rensning av NaN.")
+
+    # Binary
+    df_bin = df.dropna(subset=['target_binary'])
+    if not df_bin.empty:
+        X, y = df_bin[features], df_bin['target_binary']
+        split_idx = int(len(X) * TrainingConfig.TRAIN_SPLIT_RATIO)
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        _train_single_model('Binary', X_train, y_train, X_test, y_test)
+    else:
+        print("\nSkippar Binary-modell: Ingen data efter rensning av NaN.")
+
+    # Ranking
+    df_rank = df.dropna(subset=['target_rank'])
+    if not df_rank.empty:
+        X, y = df_rank[features], df_rank['target_rank']
+        split_idx = int(len(X) * TrainingConfig.TRAIN_SPLIT_RATIO)
+        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        _train_single_model('Ranking', X_train, y_train, X_test, y_test)
+    else:
+        print("\nSkippar Ranking-modell: Ingen data efter rensning av NaN.")
 
 
 if __name__ == "__main__":
