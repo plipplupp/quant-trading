@@ -65,3 +65,46 @@ def calculate_max_drawdown(prices):
     # Beräkna nedgången från den löpande toppen
     drawdown = (prices - running_max) / running_max
     return drawdown.min()
+
+def clean_and_filter_data(df, price_col='adj_close', min_price=10.0, max_daily_return=0.50):
+    """
+    Rensar bort aktier (tickers) som inte uppfyller datakrav:
+    - För stora dagliga rörelser
+    - För ofta under minsta prisnivå
+
+    Returns:
+        df (pd.DataFrame): Rensad DataFrame
+        removed_tickers (list): Lista med borttagna tickers
+    """
+    print("\n--- Datakvalitetskontroll & Sanering ---")
+
+    tickers_before = df['ticker'].nunique()
+    removed_tickers = []
+
+    # Beräkna daglig avkastning
+    df['daily_return'] = df.groupby('ticker')[price_col].pct_change()
+
+    # 1. Ta bort tickers med extrema rörelser
+    extreme_movers = df[df['daily_return'].abs() > max_daily_return]['ticker'].unique().tolist()
+    if extreme_movers:
+        print(f"⚠️ Tar bort {len(extreme_movers)} tickers med extrema dagliga rörelser (> {max_daily_return:.0%}): {', '.join(extreme_movers)}")
+        df = df[~df['ticker'].isin(extreme_movers)]
+        removed_tickers.extend(extreme_movers)
+
+    # 2. Ta bort penny stocks
+    low_price_tickers = df[df[price_col] < min_price]['ticker'].value_counts()
+    penny_stocks = low_price_tickers[low_price_tickers > 10].index.tolist()
+    if penny_stocks:
+        print(f"⚠️ Tar bort {len(penny_stocks)} tickers som ofta handlas under {min_price} kr: {', '.join(penny_stocks)}")
+        df = df[~df['ticker'].isin(penny_stocks)]
+        removed_tickers.extend(penny_stocks)
+
+    tickers_after = df['ticker'].nunique()
+    removed_count = tickers_before - tickers_after
+
+    print(f"✅ Datasanering slutförd. (borttagna tickers: {removed_count})")
+    
+    # Städa upp
+    df = df.drop(columns=['daily_return'])
+    return df, removed_tickers
+

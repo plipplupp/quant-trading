@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from config import DataConfig, DatabaseConfig
 from datetime import datetime, timedelta
+from utils import clean_and_filter_data
 
 # =============================================================================
 # HJÄLPFUNKTIONER FÖR FEATURE-BERÄKNING (Dina avancerade funktioner, inga ändringar här)
@@ -205,15 +206,25 @@ def _calculate_and_save_features(tickers, conn):
         omx_df['date'] = pd.to_datetime(omx_df['date']).dt.strftime('%Y-%m-%d')
 
     all_prepared_dfs = []
+    all_removed_tickers = []
     for ticker in tickers:
         print(f"Beräknar features för {ticker}...")
         df = pd.read_sql(f"SELECT * FROM stocks_raw WHERE ticker='{ticker}' ORDER BY date", conn)
         
-        # FIX: Sanera rådata INNAN några beräkningar görs för att undvika TypeError.
+        # Sanera rådata INNAN några beräkningar görs för att undvika TypeError.
         if df.empty:
             print(f"  - Ingen rådata för {ticker}. Skippar.")
             continue
-            
+        
+        # Sanera och filtrera aktier som har för stor rörelse eller är penny stocks
+        df, removed_tickers = clean_and_filter_data(df, price_col='adj_close')
+
+        all_removed_tickers.extend(removed_tickers)
+
+        if df.empty or len(df) < 200:
+            print(f"  - För lite giltig data efter sanering för {ticker} ({len(df)} rader). Skippar.")
+            continue
+
         # Konvertera alla kolumner som ska vara numeriska
         numeric_cols = ['open', 'high', 'low', 'close', 'adj_close', 'volume']
         for col in numeric_cols:
@@ -320,6 +331,9 @@ def _calculate_and_save_features(tickers, conn):
         print(f"  - Förlorade {rows_lost_core:,} rader pga saknad kärndata")
         print(f"  - Förlorade {final_rows_lost:,} rader i slutkontroll")
         print(f"  - Totalt kvar: {len(final_df):,} rader ({(len(final_df)/initial_rows)*100:.1f}%)")
+        print(f"  - Totalt kvar: {len(final_df):,} rader ({(len(final_df)/initial_rows)*100:.1f}%)")
+        print(f"  - Totalt borttagna tickers: {len(set(all_removed_tickers))}")
+
 
         final_df.to_sql('stocks_prepared', conn, if_exists='replace', index=False)
         print("\nDen nya 'stocks_prepared'-tabellen har sparats med alla nya features.")
