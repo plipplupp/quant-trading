@@ -50,7 +50,7 @@ def _train_single_model(model_type, df, features, target_col):
         model = XGBClassifier(**common_xgb_params, eval_metric='logloss', use_label_encoder=False)
     else:
         model = XGBRegressor(**common_xgb_params)
-
+    
     pipeline = Pipeline([
         ('scaler', StandardScaler()),
         ('model', model)

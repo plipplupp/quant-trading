@@ -51,7 +51,7 @@ class BacktestConfig:
     INITIAL_CAPITAL = 100000
     BROKERAGE_FIXED_FEE = 69.0
     BROKERAGE_PERCENTAGE = 0.00069
-    TRADE_ALLOCATION = 0.8     # andel kapital per handelsdag
+    TRADE_ALLOCATION = 1.0     # andel kapital per handelsdag
     STOP_LOSS_PCT = 0.05       # 5% stop-loss
 
     REGRESSION_THRESHOLD = 0.01   # köp endast om prognos > 1%
@@ -94,3 +94,9 @@ class TrainingConfig:
     CV_SPLITS = 4
     RANDOM_SEARCH_ITERS = 20
     USE_GPU = True
+
+
+
+
+
+

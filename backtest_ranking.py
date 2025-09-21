@@ -1,4 +1,4 @@
-# backtest_ranking.py
+# backtest_ranking.py  (ersätt din gamla backtest_ranking med denna)
 import os
 import math
 import joblib
@@ -11,184 +11,230 @@ from utils import (
     calculate_max_drawdown
 )
 
-
 def _get_feature_cols(df):
-    return [c for c in df.columns if c not in ['date', 'ticker',
-                                               'target_regression',
-                                               'target_binary',
-                                               'target_rank']]
+    return [c for c in df.columns if c not in [
+        'date', 'ticker',
+        'target_regression', 'target_binary', 'target_rank'
+    ]]
 
-
-def _extract_price(val):
-    """Säker extraktion av pris oavsett scalar/Series."""
-    if hasattr(val, 'iloc'):
-        return float(val.iloc[0])
-    return float(val)
-
-
-def check_data_quality(df):
-    """Kontrollera datan för orealistiska värden per ticker"""
-    print("\n--- Datakvalitetskontroll ---")
-
-    for ticker in df['ticker'].unique():
-        ticker_df = df[df['ticker'] == ticker].copy()
-        ticker_df = ticker_df.sort_values('date')
-
-        # Kontrollera stora kurshopp
-        ticker_df['price_change'] = ticker_df['adj_close'].pct_change()
-        extreme_changes = ticker_df[abs(ticker_df['price_change']) > 0.5]  # >50% på en dag
-        if not extreme_changes.empty:
-            print(f"⚠️ {ticker}: Extrema prisförändringar funna:")
-            for _, row in extreme_changes.head(3).iterrows():
-                print(f"   {row['date'].date()}: {row['price_change']*100:+.1f}% (pris: {row['adj_close']:.2f})")
-
-        # Kontrollera suspekta låga priser
-        very_cheap = ticker_df[ticker_df['adj_close'] < 5.0]
-        if not very_cheap.empty:
-            print(f"⚠️ {ticker}: Mycket låga priser under 5 kr:")
-            for _, row in very_cheap.head(3).iterrows():
-                print(f"   {row['date'].date()}: {row['adj_close']:.2f} kr")
+def _extract_price_safe(row, preferred=('adj_close', 'close', 'open')):
+    for p in preferred:
+        if p in row.index:  # radens kolumner
+            val = row[p]
+            if isinstance(val, pd.Series):  # ibland en serie
+                val = val.iloc[0]
+            if pd.notnull(val) and val > 0:
+                return float(val)
+    return None
 
 
 def backtest_ranking():
-    print("\n--- Backtest Ranking ---")
+    """
+    Robust D+1 ranking backtest:
+      - Signaler genereras baserat på dagens predicted_score.
+      - Signaler exekveras nästa handelsdag: SELL på OPEN, BUY på CLOSE.
+      - Köpstorlek baseras på cash * TRADE_ALLOCATION och delas mellan dagens buys.
+      - Om kostnad inte ryms i cash minskar vi antalet aktier tills det gör det.
+    """
+    print("\n--- Backtest Ranking (robust D+1) ---")
     model_path = os.path.join(PathsConfig.MODELS_DIR, "model_ranking.pkl")
     if not os.path.exists(model_path):
         print("Ingen ranking-modell hittades. Kör train_models först.")
         return
 
-    # --- Ladda data och modell ---
+    # --- Ladda data & modell ---
     df = pd.read_parquet(os.path.join(PathsConfig.TARGETS_DIR, "stocks_with_targets.parquet"))
     model = joblib.load(model_path)
 
-    features = _get_feature_cols(df)
+    # Normalisera datum (enbart datum)
     df = df.copy()
-    df['date'] = pd.to_datetime(df['date'])
+    df['date'] = pd.to_datetime(df['date']).dt.normalize()
+
+    # Förutsätt att nödvändiga pris-kolumner finns
+    df.dropna(subset=['ticker','date','adj_close'], inplace=True)
+
+    features = _get_feature_cols(df)
+    # Predict — använd samma features som modellen tränades på
     X = df[features].fillna(0)
     df['predicted_score'] = model.predict(X)
 
-    # --- Datakvalitetskontroll ---
-    check_data_quality(df)
-
-    # --- Parametrar ---
-    top_n = getattr(TargetConfig, 'RANK_TOP_N', None)
+    # --- Init ---
+    top_n = getattr(TargetConfig, 'RANK_TOP_N', 10)
     top_pct = getattr(TargetConfig, 'RANK_TOP_PCT', None)
-    rebalance_days = getattr(TargetConfig, 'RANK_REBALANCE_DAYS', 5)
+    rebalance_freq = getattr(TargetConfig, 'RANK_REBALANCE_DAYS', 5)
 
-    ticker_dfs = {t: g.set_index('date').sort_index() for t, g in df.groupby('ticker')}
     all_dates = sorted(df['date'].unique())
-    date_to_group = {d: df[df['date'] == d] for d in all_dates}
+    # snabb åtkomst per ticker (indexerade på date)
+    ticker_dfs = {t: g.set_index('date').sort_index() for t, g in df.groupby('ticker')}
 
-    positions = {}
-    cash = BacktestConfig.INITIAL_CAPITAL
-    trade_log, daily_vals = [], []
-    port_value = cash  # initialt värde
+    cash = float(BacktestConfig.INITIAL_CAPITAL)
+    positions = {}  # {ticker: {'shares': int, 'purchase_price': float}}
+    pending_signals = []  # list of {'action','ticker','exec_date','reason'}
+    trade_log = []
+    daily_logs = []
 
-    for i, date in enumerate(all_dates):
-        g = date_to_group[date]
+    # Helper för att undvika dubbletter i pending_signals
+    def _add_pending(action, ticker, exec_date, reason):
+        for s in pending_signals:
+            if s['action']==action and s['ticker']==ticker and s['exec_date']==exec_date:
+                return
+        pending_signals.append({'action': action, 'ticker': ticker, 'exec_date': exec_date, 'reason': reason})
 
-        # --- Rebalancering ---
-        if i % rebalance_days == 0:
-            if top_n is not None:
-                selected = g.sort_values('predicted_score', ascending=False).head(top_n)
-            elif top_pct is not None:
-                cutoff = g['predicted_score'].quantile(1 - top_pct)
-                selected = g[g['predicted_score'] >= cutoff]
-            else:
-                selected = g.sort_values('predicted_score', ascending=False).head(10)
+    # --- Loop över handelsdagar ---
+    for i, today in enumerate(all_dates):
+        # 1) Börja med att värdera portföljen *med dagens priser* om möjligt:
+        portfolio_value = cash
+        for t, pos in positions.items():
+            tdf = ticker_dfs.get(t)
+            last_price = None
+            if tdf is not None:
+                if today in tdf.index:
+                    last_price = float(tdf.loc[today, 'adj_close'])
+                else:
+                    idx = tdf.index.searchsorted(today, side='right') - 1
+                    if idx >= 0:
+                        last_price = float(tdf.iloc[idx]['adj_close'])
+            if last_price is None:
+                last_price = pos['purchase_price']
+            portfolio_value += pos['shares'] * last_price
 
-            selected_tickers = set(selected['ticker'].tolist())
+        # 2) Exekvera signals för idag (SELL på OPEN, BUY på CLOSE)
+        todays_sells = [s for s in pending_signals if s['exec_date'] == today and s['action']=='SELL']
+        todays_buys  = [s for s in pending_signals if s['exec_date'] == today and s['action']=='BUY']
+        # rensa de som vi ska exekvera idag
+        pending_signals = [s for s in pending_signals if s['exec_date'] != today]
 
-            # --- Sälj utgående innehav ---
-            for t, pos in list(positions.items()):
-                if t not in selected_tickers:
-                    tdf = ticker_dfs[t]
-                    if date in tdf.index:
-                        price = _extract_price(tdf.loc[date, 'adj_close'])
-                        sale_value = pos['shares'] * price
-                        fee = calculate_brokerage_fee(sale_value,
-                                                      BacktestConfig.BROKERAGE_FIXED_FEE,
-                                                      BacktestConfig.BROKERAGE_PERCENTAGE)
-                        cash += sale_value - fee
-                        trade_log.append({
-                            'date': date, 'action': 'SELL', 'ticker': t,
-                            'price': price, 'shares': pos['shares'], 'fee': fee,
-                            'cash_after': cash, 'reason': 'REBALANCE_OUT'
-                        })
-                        positions.pop(t)
+        # SELL först — exekvera på OPEN (eller fallback)
+        for sig in todays_sells:
+            t = sig['ticker']
+            if t not in positions:
+                continue
+            tdf = ticker_dfs.get(t)
+            if tdf is None or today not in tdf.index:
+                # ingen prisdata för att sälja idag — hoppa
+                continue
+            # hämta open först, fallback adj_close
+            row = tdf.loc[today]
+            sell_price = _extract_price_safe(row, preferred=('open','adj_close','close'))
+            if sell_price is None or sell_price <= 0:
+                continue
+            shares = positions[t]['shares']
+            sale_value = shares * sell_price
+            fee = calculate_brokerage_fee(sale_value, BacktestConfig.BROKERAGE_FIXED_FEE, BacktestConfig.BROKERAGE_PERCENTAGE)
+            cash += sale_value - fee
+            trade_log.append({'date': today, 'action': 'SELL', 'ticker': t,
+                              'price': sell_price, 'shares': shares, 'fee': fee,
+                              'cash_after': cash, 'reason': sig.get('reason','SELL')})
+            del positions[t]
 
-            # --- Köp nya innehav ---
-            not_held = [t for t in selected_tickers if t not in positions]
-            if not_held:
-                capital_to_use = cash * BacktestConfig.TRADE_ALLOCATION
-                capital_per = capital_to_use / len(not_held)
+        # BUY på CLOSE — använd cash * TRADE_ALLOCATION för dagens buys
+        if todays_buys:
+            # bestäm hur mycket kapital vi låter användas idag
+            capital_to_use = float(cash) * float(BacktestConfig.TRADE_ALLOCATION)
+            # dela jämnt mellan buys (vi justerar shares se nedan vid behov)
+            n_buys = len(todays_buys)
+            capital_per = capital_to_use / max(n_buys, 1)
 
-                for t in not_held:
-                    tdf = ticker_dfs[t]
-                    if date not in tdf.index:
-                        continue
-                    price = _extract_price(tdf.loc[date, 'adj_close'])
-                    if price <= 0:
-                        continue
-                    shares = math.floor(capital_per / price)
-                    if shares <= 0:
-                        continue
-
-                    buy_cost = shares * price
-                    fee = calculate_brokerage_fee(buy_cost,
-                                                  BacktestConfig.BROKERAGE_FIXED_FEE,
-                                                  BacktestConfig.BROKERAGE_PERCENTAGE)
-                    total_cost = buy_cost + fee
-
-                    if total_cost <= cash:
-                        cash -= total_cost
-                        positions[t] = {'shares': shares, 'purchase_price': price}
-                        trade_log.append({
-                            'date': date, 'action': 'BUY', 'ticker': t,
-                            'price': price, 'shares': shares, 'fee': fee,
-                            'cash_after': cash, 'reason': 'REBALANCE_IN'
-                        })
-
-            # --- Stop-loss ---
-            for t, pos in list(positions.items()):
-                tdf = ticker_dfs[t]
-                if date not in tdf.index:
+            # Viktigt: iterera buys i deterministic ordning (t.ex. sortera ticker) för reproducerbarhet
+            for sig in sorted(todays_buys, key=lambda x: x['ticker']):
+                t = sig['ticker']
+                # hoppa om vi redan äger (kan hända i corner cases)
+                if t in positions:
                     continue
-                price_today = _extract_price(tdf.loc[date, 'adj_close'])
-                if price_today <= pos['purchase_price'] * (1 - BacktestConfig.STOP_LOSS_PCT):
-                    sale_value = pos['shares'] * price_today
-                    fee = calculate_brokerage_fee(sale_value,
-                                                  BacktestConfig.BROKERAGE_FIXED_FEE,
-                                                  BacktestConfig.BROKERAGE_PERCENTAGE)
-                    cash += sale_value - fee
-                    trade_log.append({
-                        'date': date, 'action': 'SELL', 'ticker': t,
-                        'price': price_today, 'shares': pos['shares'], 'fee': fee,
-                        'cash_after': cash, 'reason': 'STOP-LOSS'
-                    })
-                    positions.pop(t)
+                tdf = ticker_dfs.get(t)
+                if tdf is None or today not in tdf.index:
+                    continue
+                row = tdf.loc[today]
+                buy_price = _extract_price_safe(row, preferred=('adj_close','close','open'))
+                if buy_price is None or buy_price <= 0:
+                    continue
 
-        # --- Uppdatera portföljvärde ---
+                # initial antal shares utifrån capital_per
+                shares = math.floor(capital_per / buy_price)
+                # minska tills buy_cost + fee <= cash (så att vi inte går negativ)
+                while shares > 0:
+                    buy_cost = shares * buy_price
+                    fee = calculate_brokerage_fee(buy_cost, BacktestConfig.BROKERAGE_FIXED_FEE, BacktestConfig.BROKERAGE_PERCENTAGE)
+                    total_cost = buy_cost + fee
+                    if total_cost <= cash:
+                        break
+                    shares -= 1
+
+                if shares <= 0:
+                    # kan inte köpa denna ticker idag
+                    continue
+
+                # genomför köp
+                buy_cost = shares * buy_price
+                fee = calculate_brokerage_fee(buy_cost, BacktestConfig.BROKERAGE_FIXED_FEE, BacktestConfig.BROKERAGE_PERCENTAGE)
+                total_cost = buy_cost + fee
+                cash -= total_cost
+                positions[t] = {'shares': shares, 'purchase_price': buy_price}
+                trade_log.append({'date': today, 'action': 'BUY', 'ticker': t,
+                                  'price': buy_price, 'shares': shares, 'fee': fee,
+                                  'cash_after': cash, 'reason': sig.get('reason','BUY')})
+
+        # 3) Skapa signaler för morgondagen baserat på dagens data (D -> exec_date = nästa handelsdag)
+        # Stop-loss (om dagens adj_close <= purchase_price*(1-STOP_LOSS_PCT) -> SELL next day)
+        for t, pos in list(positions.items()):
+            tdf = ticker_dfs.get(t)
+            if tdf is None or today not in tdf.index:
+                continue
+            current_close = float(tdf.loc[today, 'adj_close'])
+            if current_close <= pos['purchase_price'] * (1 - float(BacktestConfig.STOP_LOSS_PCT)):
+                # schedule sell next trading day (om den finns)
+                if i + 1 < len(all_dates):
+                    exec_date = all_dates[i+1]
+                    _add_pending('SELL', t, exec_date, 'STOP_LOSS')
+
+        # Rebalansering: planera SELL/BUY för nästa dag baserat på today's ranking
+        if i % rebalance_freq == 0:
+            todays_data = df[df['date'] == today]
+            if not todays_data.empty:
+                if top_pct is not None:
+                    cutoff = todays_data['predicted_score'].quantile(1 - top_pct)
+                    selected = set(todays_data[todays_data['predicted_score'] >= cutoff]['ticker'].tolist())
+                else:
+                    selected = set(todays_data.nlargest(top_n, 'predicted_score')['ticker'].tolist())
+
+                current_holding = set(positions.keys())
+                to_sell = current_holding - selected
+                to_buy  = selected - current_holding
+
+                if i + 1 < len(all_dates):
+                    exec_date = all_dates[i+1]
+                    for t in to_sell:
+                        _add_pending('SELL', t, exec_date, 'REBALANCE_OUT')
+                    for t in to_buy:
+                        _add_pending('BUY', t, exec_date, 'REBALANCE_IN')
+
+        # 4) Logga dagligt värde (runda till heltal)
+        # återberäkna mark-to-market med dagens adj_close om möjligt
         port_value = cash
         for t, pos in positions.items():
-            tdf = ticker_dfs[t]
-            idx = tdf.index.searchsorted(date, side="right") - 1
-            if idx >= 0:
-                last_price = _extract_price(tdf.iloc[idx]['adj_close'])
-                port_value += pos['shares'] * last_price
+            tdf = ticker_dfs.get(t)
+            last_price = pos['purchase_price']
+            if tdf is not None:
+                if today in tdf.index:
+                    last_price = float(tdf.loc[today,'adj_close'])
+                else:
+                    idx = tdf.index.searchsorted(today, side='right') - 1
+                    if idx >= 0:
+                        last_price = float(tdf.iloc[idx]['adj_close'])
+            port_value += pos['shares'] * last_price
 
-        daily_vals.append({'date': date, 'portfolio_value': port_value})
+        daily_logs.append({'date': today, 'portfolio_value': int(round(port_value)), 'cash': int(round(cash)), 'positions_count': len(positions)})
 
-    # --- Summera resultat ---
+        # säkerhetskontroller (snabb varning)
+        if cash < -1e-6:
+            print(f"VARNING: cash negativt på {today}: {cash:.2f}")
+
+    # --- Summera och spara resultat ---
     trades_df = pd.DataFrame(trade_log)
-    daily_df = pd.DataFrame(daily_vals)
-    if daily_df.empty:
-        print("⚠️ Inga dagliga värden genererades.")
-        return
+    daily_df = pd.DataFrame(daily_logs).set_index('date')
 
-    daily_df.set_index('date', inplace=True)
     final_value = float(daily_df['portfolio_value'].iloc[-1])
-    total_profit = final_value - BacktestConfig.INITIAL_CAPITAL
+    total_profit = final_value - float(BacktestConfig.INITIAL_CAPITAL)
     total_fees = trades_df['fee'].sum() if not trades_df.empty else 0.0
     total_trades = len(trades_df)
     daily_returns = daily_df['portfolio_value'].pct_change().dropna()
@@ -200,7 +246,8 @@ def backtest_ranking():
     os.makedirs(PathsConfig.RESULTS_DIR, exist_ok=True)
     trades_out = os.path.join(PathsConfig.RESULTS_DIR, "ranking_trades.csv")
     daily_out = os.path.join(PathsConfig.RESULTS_DIR, "ranking_daily.csv")
-    format_trades_csv(trades_df, trades_out)
+    if not trades_df.empty:
+        trades_df.to_csv(trades_out, index=False)
     daily_df.to_csv(daily_out)
 
     print("\n--- Ranking backtest summary ---")
@@ -211,16 +258,5 @@ def backtest_ranking():
     print(f"Sharpe (år): {sharpe:.2f}, Sortino (år): {sortino:.2f}, MaxDD: {maxdd:.2%}")
     print(f"Sparade trades -> {trades_out}, daglig portfölj -> {daily_out}")
 
-
-def format_trades_csv(trades_df, output_path):
-    """Formaterar trades DataFrame med färre decimaler innan CSV-export"""
-    if trades_df.empty:
-        return
-
-    formatted_df = trades_df.copy()
-    formatted_df['price'] = formatted_df['price'].round(2)
-    formatted_df['shares'] = formatted_df['shares'].astype(int)
-    formatted_df['fee'] = formatted_df['fee'].round(0).astype(int)
-    formatted_df['cash_after'] = formatted_df['cash_after'].round(0).astype(int)
-    formatted_df.to_csv(output_path, index=False)
-    return formatted_df
+if __name__ == "__main__":
+    backtest_ranking()
