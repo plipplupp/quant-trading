@@ -1,0 +1,60 @@
+ALERT large trade at i=1436, date=2025-09-16 00:00:00
+cash (före köp) = 26380429335.074
+capital_to_use = 61611016318.36058
+capital_per = 8801573759.765797
+buy_price = 274.5
+shares_calculated = 32064020
+len(positions) = 7
+Current positions snapshot (top 20):
+  HEXA-B.ST: shares=77767783, purchase_price=110.1500015258789
+  MEKO.ST: shares=106147729, purchase_price=80.69999694824219
+  PCELL.ST: shares=307029445, purchase_price=27.899999618530273
+  ELAN-B.ST: shares=154684947, purchase_price=56.900001525878906
+  HM-B.ST: shares=58211467, purchase_price=151.1999969482422
+  NOTE.ST: shares=46178244, purchase_price=190.60000610351562
+  SKA-B.ST: shares=37200226, purchase_price=236.60000610351562
+
+Last 30 trades (if any):
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'SELL', 'ticker': 'NEWA-B.ST', 'price': 107.4000015258789, 'shares': 80924138, 'fee': 5996964.2558295, 'cash_after': 17258199720.31431, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'SELL', 'ticker': 'CEVI.ST', 'price': 176.8000030517578, 'shares': 48463556, 'fee': 5912166.225602334, 'cash_after': 25820644402.787743, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'SELL', 'ticker': 'EMBRAC-B.ST', 'price': 83.5999984741211, 'shares': 98825902, 'fee': 5700673.226918512, 'cash_after': 34076788985.964466, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'SELL', 'ticker': 'HEXA-B.ST', 'price': 104.9000015258789, 'shares': 80172055, 'fee': 5802933.597364665, 'cash_after': 42481034744.19995, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'SELL', 'ticker': 'AZN.ST', 'price': 1508.0, 'shares': 5654875, 'fee': 5884010.535, 'cash_after': 51002702233.66495, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'BUY', 'ticker': 'CLAS-B.ST', 'price': 324.2711181640625, 'shares': 26214022, 'fee': 5865310.65560696, 'cash_after': 42496386697.492004, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'BUY', 'ticker': 'LUND-B.ST', 'price': 471.79998779296875, 'shares': 18017063, 'fee': 5865310.571390953, 'cash_after': 33990071283.455463, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'BUY', 'ticker': 'NIBE-B.ST', 'price': 37.40999984741211, 'shares': 227224015, 'fee': 5865310.752870073, 'cash_after': 25483755606.224228, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'BUY', 'ticker': 'SAVE.ST', 'price': 266.79998779296875, 'shares': 31860759, 'fee': 5865310.577469556, 'cash_after': 16977440183.37204, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-02 00:00:00'), 'action': 'BUY', 'ticker': 'SWED-A.ST', 'price': 265.1000061035156, 'shares': 32065070, 'fee': 5865310.674369662, 'cash_after': 8471124619.988014, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-03 00:00:00'), 'action': 'SELL', 'ticker': 'BEIJ-B.ST', 'price': 159.1999969482422, 'shares': 51532338, 'fee': 5660724.156111691, 'cash_after': 16669411948.167686, 'reason': 'STOP_LOSS_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'SELL', 'ticker': 'SAVE.ST', 'price': 275.20001220703125, 'shares': 31860759, 'fee': 6049976.0733504435, 'cash_after': 25431443237.81962, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'SELL', 'ticker': 'NIBE-B.ST', 'price': 38.40999984741211, 'shares': 227224015, 'fee': 6022095.323220073, 'cash_after': 34153095523.974766, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'SELL', 'ticker': 'HPOL-B.ST', 'price': 84.80000305175781, 'shares': 101013031, 'fee': 5910474.682576441, 'cash_after': 42713090386.3595, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'SELL', 'ticker': 'SWED-A.ST', 'price': 271.0, 'shares': 32065070, 'fee': 5995847.4393, 'cash_after': 51396728508.9202, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'BUY', 'ticker': 'HEXA-B.ST', 'price': 110.1500015258789, 'shares': 77767783, 'fee': 5910623.777118811, 'cash_after': 42824696469.028854, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'BUY', 'ticker': 'HOLM-B.ST', 'price': 363.3999938964844, 'shares': 23572156, 'fee': 5910623.729103615, 'cash_after': 34252664498.772774, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'BUY', 'ticker': 'MEKO.ST', 'price': 80.69999694824219, 'shares': 106147729, 'fee': 5910623.770390359, 'cash_after': 25680632468.639545, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'BUY', 'ticker': 'PCELL.ST', 'price': 27.899999618530273, 'shares': 307029445, 'fee': 5910623.7648805175, 'cash_after': 17108600446.497105, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-09 00:00:00'), 'action': 'BUY', 'ticker': 'SOBI.ST', 'price': 276.6000061035156, 'shares': 30969346, 'fee': 5910623.691909102, 'cash_after': 8536568530.183309, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'SELL', 'ticker': 'LUND-B.ST', 'price': 492.0, 'shares': 18017063, 'fee': 6116432.547239999, 'cash_after': 17394847093.63607, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'SELL', 'ticker': 'ELUX-B.ST', 'price': 54.099998474121094, 'shares': 154652443, 'fee': 5773020.881920178, 'cash_after': 25755771003.07325, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'SELL', 'ticker': 'SOBI.ST', 'price': 273.79998779296875, 'shares': 30969346, 'fee': 5850790.524161795, 'cash_after': 34229326769.305313, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'SELL', 'ticker': 'RATO-B.ST', 'price': 36.060001373291016, 'shares': 241368569, 'fee': 6005588.141430408, 'cash_after': 42927072110.77317, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'SELL', 'ticker': 'HOLM-B.ST', 'price': 360.79998779296875, 'shares': 23572156, 'fee': 5868335.181967229, 'cash_after': 51426037372.64516, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'SELL', 'ticker': 'CLAS-B.ST', 'price': 388.79998779296875, 'shares': 26214022, 'fee': 7032487.889187183, 'cash_after': 61611016318.36058, 'reason': 'REBALANCE_OUT_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'BUY', 'ticker': 'ELAN-B.ST', 'price': 56.900001525878906, 'shares': 154684947, 'fee': 6073085.867028044, 'cash_after': 52803369512.163055, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'BUY', 'ticker': 'HM-B.ST', 'price': 151.1999969482422, 'shares': 58211467, 'fee': 6073085.806599364, 'cash_after': 43995722793.60376, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'BUY', 'ticker': 'NOTE.ST', 'price': 190.60000610351562, 'shares': 46178244, 'fee': 6073085.775892247, 'cash_after': 35188076119.57823, 'reason': 'REBALANCE_IN_random'}
+{'date': Timestamp('2025-09-16 00:00:00'), 'action': 'BUY', 'ticker': 'SKA-B.ST', 'price': 236.60000610351562, 'shares': 37200226, 'fee': 6073085.852069991, 'cash_after': 26380429335.074, 'reason': 'REBALANCE_IN_random'}
+
+Sample rows from df for this ticker around date:
+               ticker        open        high         low       close   adj_close   volume  ...  relative_return_1d  day_of_week  month_of_year  week_of_year  target_regression  target_binary  target_rank
+date                                                                                        ...                                                                                                             
+2025-09-09  VOLV-B.ST  274.100006  276.399994  271.399994  274.100006  274.100006  2009915  ...            0.002769            1              9          37.0                NaN              0          NaN
+2025-09-10  VOLV-B.ST  274.600006  275.799988  271.700012  272.700012  272.700012  2467379  ...           -0.003672            2              9          37.0                NaN              0          NaN
+2025-09-11  VOLV-B.ST  273.100006  275.899994  269.700012  274.700012  274.700012  2336948  ...            0.004763            3              9          37.0                NaN              0          NaN
+2025-09-12  VOLV-B.ST  275.100006  276.000000  272.600006  273.600006  273.600006  1730453  ...           -0.003784            4              9          37.0                NaN              0          NaN
+2025-09-15  VOLV-B.ST  274.399994  276.700012  272.100006  272.799988  272.799988  1710991  ...           -0.003725            0              9          38.0                NaN              0          NaN
+2025-09-16  VOLV-B.ST  273.799988  278.100006  273.700012  274.500000  274.500000  2309348  ...            0.015043            1              9          38.0                NaN              0          NaN
+2025-09-17  VOLV-B.ST  274.799988  276.700012  274.100006  275.000000  275.000000  2323142  ...            0.001118            2              9          38.0                NaN              0          NaN
+
+[7 rows x 98 columns]

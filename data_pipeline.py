@@ -188,6 +188,7 @@ def _fetch_raw_data(tickers, conn):
             continue
         
         data_to_save = data[available_cols]
+        
         data_to_save.to_sql('stocks_raw', conn, if_exists='append', index=False)
         print(f"  Sparade {len(data_to_save)} nya rader rådata för {db_ticker_name}.")
 
@@ -333,6 +334,26 @@ def _calculate_and_save_features(tickers, conn):
         print(f"  - Totalt kvar: {len(final_df):,} rader ({(len(final_df)/initial_rows)*100:.1f}%)")
         print(f"  - Totalt kvar: {len(final_df):,} rader ({(len(final_df)/initial_rows)*100:.1f}%)")
         print(f"  - Totalt borttagna tickers: {len(set(all_removed_tickers))}")
+
+
+        # === DEBUG: sanity check på data ===
+        print("Adj_close percentiles:")
+        print(final_df['adj_close'].quantile([0,0.001,0.01,0.1,0.5,0.9,0.99,0.999,1.0]))
+
+        dups = final_df.duplicated(subset=['ticker','date']).sum()
+        print("Duplicerade (ticker,date) rader:", dups)
+        if dups > 0:
+            print("Exempel dubblett-rader:")
+            print(final_df[final_df.duplicated(subset=['ticker','date'], keep=False)]
+                .sort_values(['ticker','date'])
+                .head(10))
+
+        print("Top 20 tickers med största adj_close-värden:")
+        print(final_df.groupby('ticker')['adj_close']
+                .max()
+                .sort_values(ascending=False)
+                .head(20))
+        print("=== END DEBUG ===")
 
 
         final_df.to_sql('stocks_prepared', conn, if_exists='replace', index=False)

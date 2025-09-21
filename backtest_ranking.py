@@ -46,6 +46,17 @@ def backtest_ranking():
     df = pd.read_parquet(os.path.join(PathsConfig.TARGETS_DIR, "stocks_with_targets.parquet"))
     model = joblib.load(model_path)
 
+    # Kontrollera att modellen är en pipeline med scaler (om möjligt)
+    try:
+        import sklearn
+        if hasattr(model, 'named_steps') and 'scaler' in model.named_steps:
+            print("OK model is a pipeline and includes scaler.")
+        else:
+            print("VARNING: modeller saknar scaler i pipeline - kontrollera hur modellen sparades.")
+    except Exception as e:
+        print("Could not inspect model:", e)
+
+
     # Normalisera datum (enbart datum)
     df = df.copy()
     df['date'] = pd.to_datetime(df['date']).dt.normalize()
