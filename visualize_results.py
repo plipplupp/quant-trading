@@ -24,8 +24,8 @@ def show_results():
     strategies = {
         "OMXS30 Benchmark": "benchmark_omx_daily.csv",
         "Lika Viktad Portfölj": "benchmark_equal_weight_daily.csv",
-        "Regression-Strategi": "regression_daily.csv",
-        "Binary-Strategi": "binary_daily.csv",
+        "Regression-Strategi: Köper/säljer baserat på förutsagd procentuell avkastning (2%).": "regression_daily.csv",
+        "Binary-Strategi: Köper/säljer baserat på sannolikhet att överträffa index.": "binary_daily.csv",
         #"Ranking-Strategi": "ranking_daily.csv"
     }
 

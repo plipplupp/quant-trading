@@ -56,8 +56,8 @@ class BacktestConfig:
 
     REGRESSION_THRESHOLD_BUY = 0.02     # köp endast om prognos > 2%
     REGRESSION_THRESHOLD_SELL = -0.02   # sälj om prognos < 2%
-    BINARY_THRESHOLD_BUY = 0.7          # köp endast om sannolikhet > 55%
-    BINARY_THRESHOLD_SELL = 0.49        # sälj om sannolikhet < 49%
+    BINARY_THRESHOLD_BUY = 0.7          # köp endast om sannolikhet att slå index är > 70%
+    BINARY_THRESHOLD_SELL = 0.49        # sälj om sannolikhet att slå index är < 49%
 
 # =========================
 # Targets
