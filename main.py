@@ -1,54 +1,23 @@
 from config import DataConfig
 from data_pipeline import run_data_pipeline
 from generate_targets import generate_targets
+import visualize_results
 from train_models import train_models
 from backtest_regression import backtest_regression
 from backtest_binary import backtest_binary
 from backtest_ranking import backtest_ranking
-import os
-import matplotlib.pyplot as plt
-import pandas as pd
-from config import PathsConfig
+from benchmark_analysis import run_omx_benchmark, run_equal_weight_benchmark
 from load_models import load_models
 
-# Ladda alla modeller
+# Ladda alla modeller vid start
 models = load_models()
-
-def show_results():
-    print("\n--- Sammanfattande resultat ---")
-
-    files = {
-        "Regression": "regression_results.csv",
-        "Binary": "binary_results.csv",
-        "Ranking": "ranking_results.csv"
-    }
-
-    portfolios = {}
-    for name, file in files.items():
-        path = os.path.join(PathsConfig.RESULTS_DIR, file)
-        if os.path.exists(path):
-            df = pd.read_csv(path)
-            if "portfolio" in df.columns:
-                portfolios[name] = df
-            else:
-                portfolios[name] = pd.DataFrame({"portfolio": df.iloc[:,1].values})
-            print(f"{name}: slutkapital {portfolios[name]['portfolio'].iloc[-1]:.2f} kr")
-        else:
-            print(f"{name}: inget resultat hittat.")
-
-    if portfolios:
-        plt.figure(figsize=(10,6))
-        for name, df in portfolios.items():
-            plt.plot(df['portfolio'].values, label=name)
-        plt.title("Portföljutveckling")
-        plt.legend()
-        plt.show()
 
 def run_all_backtests():
     backtest_regression()
     backtest_binary()
     backtest_ranking()
-    show_results()
+    visualize_results.show_results()
+
 
 def main():
     while True:
@@ -60,7 +29,8 @@ def main():
         print("5. Backtest Binary vs Index")
         print("6. Backtest Ranking")
         print("7. Backtest Alla Strategier")
-        print("8. Visa resultat")
+        print("8. Kör Benchmark-analyser")
+        print("9. Visa resultat")
         print("0. Avsluta")
 
         choice = input("Välj ett alternativ: ")
@@ -80,7 +50,10 @@ def main():
         elif choice == "7":
             run_all_backtests()
         elif choice == "8":
-            show_results()
+            run_omx_benchmark()
+            run_equal_weight_benchmark()
+        elif choice == "9":
+            visualize_results.show_results()
         elif choice == "0":
             break
         else:

@@ -1,5 +1,130 @@
+import math
 import pandas as pd
 import numpy as np
+
+# Simuleringsmotor för backtesting av tradingstrategierna regression och binär klassificering
+def simulate_engine(df, buy_signals_df, initial_capital, brokerage_fixed_fee, brokerage_percentage, trade_allocation, stop_loss_pct):
+    """ 
+    Gemensam backtest-simulator för alla strategier.
+    Hanterar köp (signal=1), sälj (signal=-1) och håll (signal=0).
+    """
+    df = df.copy()
+    df['date'] = pd.to_datetime(df['date'])
+    all_dates = sorted(df['date'].unique())
+    
+    # Förbered lookup: {ticker: df_ticker} med date som index
+    ticker_dfs = {t: g.set_index('date').sort_index() for t, g in df.groupby('ticker')}
+    
+    # Signal map (date,ticker) -> signal (-1, 0, 1)
+    signal_map = buy_signals_df.set_index(['date', 'ticker'])['signal'].to_dict() if not buy_signals_df.empty else {}
+    
+    trade_log = []
+    positions = {}
+    cash = initial_capital
+    daily_values = []
+    
+    for date in all_dates:
+        # --- Sälj först ---
+        for ticker, pos in list(positions.items()):
+            tdf = ticker_dfs[ticker]
+            if date not in tdf.index:
+                continue
+                
+            # FIX: Hantera Series vs scalar
+            price_data = tdf.loc[date, 'adj_close']
+            if hasattr(price_data, 'iloc'):
+                price = float(price_data.iloc[0])
+            else:
+                price = float(price_data)
+                
+            sell_reason = None
+            
+            # Stop-loss kontroll
+            if price <= pos['purchase_price'] * (1 - stop_loss_pct):
+                sell_reason = 'STOP-LOSS'
+            # Säljsignal från modell
+            elif signal_map.get((date, ticker)) == -1:
+                sell_reason = 'SELL-SIGNAL'
+                
+            if sell_reason:
+                sale_value = pos['shares'] * price
+                fee = calculate_brokerage_fee(sale_value, brokerage_fixed_fee, brokerage_percentage)
+                cash += sale_value - fee
+                trade_log.append({
+                    'date': date,
+                    'action': 'SELL', 
+                    'ticker': ticker,
+                    'price': price,
+                    'shares': pos['shares'],
+                    'fee': fee,
+                    'cash_after': cash,
+                    'reason': sell_reason
+                })
+                positions.pop(ticker)
+        
+        # --- Köp ---
+        buy_candidates = []
+        for ticker, tdf in ticker_dfs.items():
+            # Köp endast om signal = 1 och vi inte redan äger aktien
+            if signal_map.get((date, ticker)) == 1 and ticker not in positions:
+                if date in tdf.index:
+                    price_data = tdf.loc[date, 'adj_close']
+                    if hasattr(price_data, 'iloc'):
+                        price = float(price_data.iloc[0])
+                    else:
+                        price = float(price_data)
+                    buy_candidates.append({'ticker': ticker, 'price': price})
+        
+        if buy_candidates and cash > brokerage_fixed_fee:
+            capital_to_use = cash * trade_allocation
+            capital_per_trade = capital_to_use / len(buy_candidates)
+            
+            for cand in buy_candidates:
+                ticker, price = cand['ticker'], cand['price']
+                if price <= 0:
+                    continue
+                    
+                shares = math.floor(capital_per_trade / price)
+                if shares <= 0:
+                    continue
+                    
+                buy_cost = shares * price
+                fee = calculate_brokerage_fee(buy_cost, brokerage_fixed_fee, brokerage_percentage)
+                total_cost = buy_cost + fee
+                
+                if total_cost <= cash:
+                    cash -= total_cost
+                    positions[ticker] = {'shares': shares, 'purchase_price': price}
+                    trade_log.append({
+                        'date': date,
+                        'action': 'BUY',
+                        'ticker': ticker,
+                        'price': price,
+                        'shares': shares,
+                        'fee': fee,
+                        'cash_after': cash,
+                        'reason': 'BUY-SIGNAL'
+                    })
+        
+        # --- Portföljvärde ---
+        port_value = cash
+        for t, pos in positions.items():
+            tdf = ticker_dfs[t]
+            # hitta senaste pris fram till date
+            idx = tdf.index.searchsorted(date, side="right") - 1
+            if idx >= 0:
+                last_price_data = tdf.iloc[idx]['adj_close']
+                if hasattr(last_price_data, 'iloc'):
+                    last_price = float(last_price_data.iloc[0])
+                else:
+                    last_price = float(last_price_data)
+                port_value += pos['shares'] * last_price
+        
+        daily_values.append({'date': date, 'portfolio_value': port_value})
+    
+    trades_df = pd.DataFrame(trade_log)
+    daily_df = pd.DataFrame(daily_values)
+    return trades_df, daily_df
 
 def calculate_brokerage_fee(transaction_cost, fixed_fee, percentage_fee):
     """

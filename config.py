@@ -54,8 +54,10 @@ class BacktestConfig:
     TRADE_ALLOCATION = 1.0     # andel kapital per handelsdag
     STOP_LOSS_PCT = 0.05       # 5% stop-loss
 
-    REGRESSION_THRESHOLD = 0.01   # köp endast om prognos > 1%
-    BINARY_THRESHOLD = 0.55       # köp endast om sannolikhet > 55%
+    REGRESSION_THRESHOLD_BUY = 0.02     # köp endast om prognos > 2%
+    REGRESSION_THRESHOLD_SELL = -0.02   # sälj om prognos < 2%
+    BINARY_THRESHOLD_BUY = 0.7          # köp endast om sannolikhet > 55%
+    BINARY_THRESHOLD_SELL = 0.49        # sälj om sannolikhet < 49%
 
 # =========================
 # Targets
