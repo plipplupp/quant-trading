@@ -71,7 +71,6 @@ class TargetConfig:
     RANK_TOP_PCT = 0.1      # Alternativt: andel av aktier att hålla i portföljen (10%) om inte RANK_TOP_N är satt
     RANK_REBALANCE_DAYS = 5 # Hur ofta portföljen rebalanseras (i dagar)
 
-
 # =========================
 # Paths
 # =========================
