@@ -8,7 +8,8 @@ from utils import (
     calculate_brokerage_fee,
     calculate_sharpe_ratio,
     calculate_sortino_ratio,
-    calculate_max_drawdown
+    calculate_max_drawdown,
+    _extract_price_safe
 )
 
 def _get_feature_cols(df):
@@ -16,17 +17,6 @@ def _get_feature_cols(df):
         'date', 'ticker',
         'target_regression', 'target_binary', 'target_rank'
     ]]
-
-def _extract_price_safe(row, preferred=('adj_close', 'close', 'open')):
-    for p in preferred:
-        if p in row.index:  # radens kolumner
-            val = row[p]
-            if isinstance(val, pd.Series):  # ibland en serie
-                val = val.iloc[0]
-            if pd.notnull(val) and val > 0:
-                return float(val)
-    return None
-
 
 def backtest_ranking():
     """
@@ -124,9 +114,9 @@ def backtest_ranking():
             if tdf is None or today not in tdf.index:
                 # ingen prisdata för att sälja idag — hoppa
                 continue
-            # hämta open först, fallback adj_close
+            # hämta open först, fallback till close
             row = tdf.loc[today]
-            sell_price = _extract_price_safe(row, preferred=('open','adj_close','close'))
+            sell_price = _extract_price_safe(row, preferred=('open','close'))
             if sell_price is None or sell_price <= 0:
                 continue
             shares = positions[t]['shares']
@@ -156,7 +146,7 @@ def backtest_ranking():
                 if tdf is None or today not in tdf.index:
                     continue
                 row = tdf.loc[today]
-                buy_price = _extract_price_safe(row, preferred=('adj_close','close','open'))
+                buy_price = _extract_price_safe(row, preferred=('close','open'))
                 if buy_price is None or buy_price <= 0:
                     continue
 
@@ -186,12 +176,12 @@ def backtest_ranking():
                                   'cash_after': cash, 'reason': sig.get('reason','BUY')})
 
         # 3) Skapa signaler för morgondagen baserat på dagens data (D -> exec_date = nästa handelsdag)
-        # Stop-loss (om dagens adj_close <= purchase_price*(1-STOP_LOSS_PCT) -> SELL next day)
+        # Stop-loss (om dagens close <= purchase_price*(1-STOP_LOSS_PCT) -> SELL next day)
         for t, pos in list(positions.items()):
             tdf = ticker_dfs.get(t)
             if tdf is None or today not in tdf.index:
                 continue
-            current_close = float(tdf.loc[today, 'adj_close'])
+            current_close = float(tdf.loc[today, 'close'])
             if current_close <= pos['purchase_price'] * (1 - float(BacktestConfig.STOP_LOSS_PCT)):
                 # schedule sell next trading day (om den finns)
                 if i + 1 < len(all_dates):
@@ -254,12 +244,28 @@ def backtest_ranking():
     sortino = calculate_sortino_ratio(daily_returns) if len(daily_returns) > 0 else 0.0
     maxdd = calculate_max_drawdown(daily_df['portfolio_value'])
 
+    # =========================================================
+    # Skapa signal-CSV för senaste datumet
+    # =========================================================
+    print("\nSkapar dagens rankningssignaler...")
+    latest_date = df['date'].max()
+    latest_df = df[df['date'] == latest_date].copy()
+
+    # Sortera efter predicted_score (högst är bäst)
+    latest_df = latest_df.sort_values(by='predicted_score', ascending=False)
+
+    # Välj kolumner att spara
+    signals_out_path = os.path.join(PathsConfig.RESULTS_DIR, "ranking_signals_today.csv")
+    latest_df[['ticker', 'predicted_score']].to_csv(signals_out_path, index=False)
+    # =========================================================
+    
     os.makedirs(PathsConfig.RESULTS_DIR, exist_ok=True)
     trades_out = os.path.join(PathsConfig.RESULTS_DIR, "ranking_trades.csv")
     daily_out = os.path.join(PathsConfig.RESULTS_DIR, "ranking_daily.csv")
-    if not trades_df.empty:
-        trades_df.to_csv(trades_out, index=False)
+    trades_df.to_csv(trades_out, index=False)
     daily_df.to_csv(daily_out)
+
+    print(f"Dagens rankning ({latest_date.date()}): sparad till {signals_out_path}")
 
     print("\n--- Ranking backtest summary ---")
     print(f"Slutkapital: {final_value:,.2f} kr")

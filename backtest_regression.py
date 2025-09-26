@@ -109,11 +109,17 @@ def backtest_regression():
     latest_df['recommendation'] = latest_df['signal'].map(signal_map)
 
     # Sortera: Köp först, sedan Sälj, sist Neutral
-    latest_df = latest_df.sort_values(by='signal', ascending=False)
+    latest_df = latest_df.sort_values(by='predicted_return', ascending=False)
+
+    # Konvertera predicted_return till procent och format
+    latest_df['predicted_return'] = latest_df['predicted_return'] * 100
+
+    # Döp om kolumnen
+    latest_df.rename(columns={'predicted_return': 'predicted_return_[%]'}, inplace=True)
 
     # Välj kolumner att spara
     signals_out = os.path.join(PathsConfig.RESULTS_DIR, "regression_signals_today.csv")
-    latest_df[['ticker', 'recommendation', 'predicted_return']].to_csv(signals_out, index=False)
+    latest_df[['ticker', 'recommendation', 'predicted_return_[%]']].to_csv(signals_out, index=False)
 
     print(f"\nDagens signaler ({latest_date}): sparade till {signals_out}")
 

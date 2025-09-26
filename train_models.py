@@ -104,7 +104,7 @@ def train_models():
 
     df = pd.read_parquet(data_path)
 
-    ### FIX: Återställer din ursprungliga, korrekta metod för att välja features
+    #--- Förbered features och målvariabler ---
     features = [c for c in df.columns if c not in [
         'date', 'ticker',
         'target_regression', 'target_binary', 'target_rank'
@@ -115,7 +115,7 @@ def train_models():
     df[features] = df[features].apply(pd.to_numeric, errors='coerce')
     # Ersätt eventuella oändliga värden med NaN
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    # Ta bort rader där NÅGON feature är NaN, detta är det säkraste för träning
+    # Ta bort rader där NÅGON feature är NaN, säkraste för träning
     df.dropna(subset=features, inplace=True)
 
 

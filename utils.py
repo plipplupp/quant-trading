@@ -4,126 +4,140 @@ import numpy as np
 
 # Simuleringsmotor för backtesting av tradingstrategierna regression och binär klassificering
 def simulate_engine(df, buy_signals_df, initial_capital, brokerage_fixed_fee, brokerage_percentage, trade_allocation, stop_loss_pct):
-    """ 
-    Gemensam backtest-simulator för alla strategier.
-    Hanterar köp (signal=1), sälj (signal=-1) och håll (signal=0).
+    """
+    Backtest-simulator med D+1 exekveringslogik.
+    - Använder handlingsbara priser: SÄLJ på OPEN, KÖP på CLOSE.
     """
     df = df.copy()
-    df['date'] = pd.to_datetime(df['date'])
+    df['date'] = pd.to_datetime(df['date']).dt.normalize()
     all_dates = sorted(df['date'].unique())
-    
-    # Förbered lookup: {ticker: df_ticker} med date som index
     ticker_dfs = {t: g.set_index('date').sort_index() for t, g in df.groupby('ticker')}
-    
-    # Signal map (date,ticker) -> signal (-1, 0, 1)
     signal_map = buy_signals_df.set_index(['date', 'ticker'])['signal'].to_dict() if not buy_signals_df.empty else {}
-    
-    trade_log = []
+
+    cash = float(initial_capital)
     positions = {}
-    cash = initial_capital
-    daily_values = []
-    
-    for date in all_dates:
-        # --- Sälj först ---
-        for ticker, pos in list(positions.items()):
-            tdf = ticker_dfs[ticker]
-            if date not in tdf.index:
-                continue
-                
-            # FIX: Hantera Series vs scalar
-            price_data = tdf.loc[date, 'adj_close']
-            if hasattr(price_data, 'iloc'):
-                price = float(price_data.iloc[0])
-            else:
-                price = float(price_data)
-                
-            sell_reason = None
+    pending_signals = []
+    trade_log = []
+    daily_logs = []
+
+    def _add_pending(action, ticker, exec_date, reason):
+        for s in pending_signals:
+            if s['action'] == action and s['ticker'] == ticker and s['exec_date'] == exec_date:
+                return
+        pending_signals.append({'action': action, 'ticker': ticker, 'exec_date': exec_date, 'reason': reason})
+
+    for i, today in enumerate(all_dates):
+        next_day = all_dates[i + 1] if i + 1 < len(all_dates) else None
+
+        # 1. EXEKVERA DAGENS AFFÄRER
+        todays_sells = [s for s in pending_signals if s['exec_date'] == today and s['action'] == 'SELL']
+        todays_buys = [s for s in pending_signals if s['exec_date'] == today and s['action'] == 'BUY']
+        pending_signals = [s for s in pending_signals if s['exec_date'] != today]
+
+        # SÄLJ FÖRST - på dagens ÖPPNINGSKURS (OPEN)
+        for sig in todays_sells:
+            ticker = sig['ticker']
+            if ticker not in positions: continue
+            tdf = ticker_dfs.get(ticker)
+            if tdf is None or today not in tdf.index: continue
+            row = tdf.loc[today]
+            sell_price = _extract_price_safe(row, preferred=('open', 'close')) # Fallback till 'close' om 'open' saknas
             
-            # Stop-loss kontroll
-            if price <= pos['purchase_price'] * (1 - stop_loss_pct):
-                sell_reason = 'STOP-LOSS'
-            # Säljsignal från modell
-            elif signal_map.get((date, ticker)) == -1:
-                sell_reason = 'SELL-SIGNAL'
-                
-            if sell_reason:
-                sale_value = pos['shares'] * price
-                fee = calculate_brokerage_fee(sale_value, brokerage_fixed_fee, brokerage_percentage)
-                cash += sale_value - fee
-                trade_log.append({
-                    'date': date,
-                    'action': 'SELL', 
-                    'ticker': ticker,
-                    'price': price,
-                    'shares': pos['shares'],
-                    'fee': fee,
-                    'cash_after': cash,
-                    'reason': sell_reason
-                })
-                positions.pop(ticker)
-        
-        # --- Köp ---
-        buy_candidates = []
-        for ticker, tdf in ticker_dfs.items():
-            # Köp endast om signal = 1 och vi inte redan äger aktien
-            if signal_map.get((date, ticker)) == 1 and ticker not in positions:
-                if date in tdf.index:
-                    price_data = tdf.loc[date, 'adj_close']
-                    if hasattr(price_data, 'iloc'):
-                        price = float(price_data.iloc[0])
-                    else:
-                        price = float(price_data)
-                    buy_candidates.append({'ticker': ticker, 'price': price})
-        
-        if buy_candidates and cash > brokerage_fixed_fee:
-            capital_to_use = cash * trade_allocation
-            capital_per_trade = capital_to_use / len(buy_candidates)
+            if sell_price is None: continue
+
+            shares = positions[ticker]['shares']
+            sale_value = shares * sell_price
+            fee = calculate_brokerage_fee(sale_value, brokerage_fixed_fee, brokerage_percentage)
+            cash += sale_value - fee
             
-            for cand in buy_candidates:
-                ticker, price = cand['ticker'], cand['price']
-                if price <= 0:
-                    continue
-                    
-                shares = math.floor(capital_per_trade / price)
-                if shares <= 0:
-                    continue
-                    
-                buy_cost = shares * price
+            trade_log.append({
+                'date': today, 'action': 'SELL', 'ticker': ticker,
+                'price': sell_price, 'shares': shares, 'fee': fee,
+                'cash_after': cash, 'reason': sig.get('reason', 'N/A')
+            })
+            del positions[ticker]
+
+        # KÖP SEDAN - på dagens STÄNGNINGSKURS (CLOSE)
+        if todays_buys:
+            capital_to_use = float(cash) * float(trade_allocation)
+            capital_per_trade = capital_to_use / max(1, len(todays_buys))
+
+            for sig in sorted(todays_buys, key=lambda x: x['ticker']):
+                ticker = sig['ticker']
+                if ticker in positions: continue
+                tdf = ticker_dfs.get(ticker)
+                if tdf is None or today not in tdf.index: continue
+                row = tdf.loc[today]
+                buy_price = _extract_price_safe(row, preferred=('close', 'open')) # Fallback till 'open' om 'close' saknas
+                
+                if buy_price is None: continue
+
+                shares = math.floor(capital_per_trade / buy_price)
+                if shares <= 0: continue
+                
+                buy_cost = shares * buy_price
                 fee = calculate_brokerage_fee(buy_cost, brokerage_fixed_fee, brokerage_percentage)
-                total_cost = buy_cost + fee
+                if buy_cost + fee > cash:
+                    shares = math.floor((cash - fee) / buy_price)
                 
-                if total_cost <= cash:
-                    cash -= total_cost
-                    positions[ticker] = {'shares': shares, 'purchase_price': price}
-                    trade_log.append({
-                        'date': date,
-                        'action': 'BUY',
-                        'ticker': ticker,
-                        'price': price,
-                        'shares': shares,
-                        'fee': fee,
-                        'cash_after': cash,
-                        'reason': 'BUY-SIGNAL'
-                    })
+                if shares <= 0: continue
+                
+                total_cost = (shares * buy_price) + calculate_brokerage_fee(shares * buy_price, brokerage_fixed_fee, brokerage_percentage)
+                cash -= total_cost
+                positions[ticker] = {'shares': shares, 'purchase_price': buy_price}
+
+                trade_log.append({
+                    'date': today, 'action': 'BUY', 'ticker': ticker,
+                    'price': buy_price, 'shares': shares, 'fee': fee,
+                    'cash_after': cash, 'reason': sig.get('reason', 'N/A')
+                })
+
+        # 2. SKAPA NYA SIGNALER FÖR MORGONDAGEN
+        if next_day:
+            # A. Stop-loss signaler
+            for ticker, pos in list(positions.items()):
+                tdf = ticker_dfs.get(ticker)
+                if tdf is not None and today in tdf.index:
+                    # Viktigt: Stop-loss kan fortfarande baseras på adj_close för att mäta "sann" förlust
+                    current_close = float(tdf.loc[today, 'adj_close'])
+                    if current_close <= pos['purchase_price'] * (1 - stop_loss_pct):
+                        _add_pending('SELL', ticker, next_day, 'STOP_LOSS')
+
+            # B. Modellbaserade signaler
+            for (sig_date, ticker), signal_value in signal_map.items():
+                if sig_date == today:
+                    if signal_value == 1 and ticker not in positions:
+                        _add_pending('BUY', ticker, next_day, 'BUY_SIGNAL')
+                    elif signal_value == -1 and ticker in positions:
+                        _add_pending('SELL', ticker, next_day, 'SELL_SIGNAL')
         
-        # --- Portföljvärde ---
-        port_value = cash
-        for t, pos in positions.items():
-            tdf = ticker_dfs[t]
-            # hitta senaste pris fram till date
-            idx = tdf.index.searchsorted(date, side="right") - 1
-            if idx >= 0:
-                last_price_data = tdf.iloc[idx]['adj_close']
-                if hasattr(last_price_data, 'iloc'):
-                    last_price = float(last_price_data.iloc[0])
+        # 3. LOGGA DAGLIGT PORTFÖLJVÄRDE
+        portfolio_value = cash
+        for ticker, pos in positions.items():
+            tdf = ticker_dfs.get(ticker)
+            
+            # Sätt ett fallback-pris (inköpspriset) om vi inte hittar dagens kurs
+            last_known_price = pos['purchase_price'] 
+            
+            if tdf is not None:
+                # Försök hitta dagens data
+                if today in tdf.index:
+                    # Hämta dagens adj_close för en korrekt värdering.
+                    last_known_price = tdf.loc[today, 'adj_close']
                 else:
-                    last_price = float(last_price_data)
-                port_value += pos['shares'] * last_price
-        
-        daily_values.append({'date': date, 'portfolio_value': port_value})
+                    # Om dagens data saknas (t.ex. helgdag), ta den senast kända.
+                    # Din söklogik med searchsorted hanterade detta bra.
+                    idx = tdf.index.searchsorted(today, side='right') - 1
+                    if idx >= 0:
+                        last_known_price = tdf.iloc[idx]['adj_close']
+                        
+            portfolio_value += pos['shares'] * float(last_known_price)
+                    
+        daily_logs.append({'date': today, 'portfolio_value': portfolio_value})
     
-    trades_df = pd.DataFrame(trade_log)
-    daily_df = pd.DataFrame(daily_values)
+    trades_df = pd.DataFrame(trade_log) if trade_log else pd.DataFrame()
+    daily_df = pd.DataFrame(daily_logs) if daily_logs else pd.DataFrame()
+
     return trades_df, daily_df
 
 def calculate_brokerage_fee(transaction_cost, fixed_fee, percentage_fee):
@@ -132,6 +146,16 @@ def calculate_brokerage_fee(transaction_cost, fixed_fee, percentage_fee):
     """
     calculated_percentage_fee = transaction_cost * percentage_fee
     return max(fixed_fee, calculated_percentage_fee)
+
+def _extract_price_safe(row, preferred=('adj_close', 'close', 'open')):
+    for p in preferred:
+        if p in row.index:  # radens kolumner
+            val = row[p]
+            if isinstance(val, pd.Series):  # ibland en serie
+                val = val.iloc[0]
+            if pd.notnull(val) and val > 0:
+                return float(val)
+    return None
 
 def create_future_label(df, days, threshold):
     """

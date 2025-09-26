@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from utils import clean_and_filter_data
 
 # =============================================================================
-# HJÄLPFUNKTIONER FÖR FEATURE-BERÄKNING (Dina avancerade funktioner, inga ändringar här)
+# HJÄLPFUNKTIONER FÖR FEATURE-BERÄKNING
 # =============================================================================
 
 def _add_moving_averages(df):
@@ -133,7 +133,7 @@ def _fetch_raw_data(tickers, conn):
             print(f"Ingen data hittades för {db_ticker_name}.")
             continue
             
-        # FIX: Hantera multi-level kolumner från yfinance
+        # Hantera multi-level kolumner från yfinance
         data.reset_index(inplace=True)
         
         # Debug: Visa kolumnnamn
@@ -306,7 +306,7 @@ def _calculate_and_save_features(tickers, conn):
         # För övriga features: fyll NaN med strategiska värden istället för att ta bort rader
         feature_columns = [col for col in final_df.columns if col not in ['date', 'ticker']]
         
-        # Olika strategier för olika typer av features
+        # Strategier för att fylla NaN i olika typer av features
         for col in feature_columns:
             if col in final_df.columns and final_df[col].isnull().any():
                 if 'rsi' in col.lower():

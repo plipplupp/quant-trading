@@ -103,7 +103,7 @@ def backtest_binary():
     latest_df['recommendation'] = latest_df['signal'].map(signal_map)
 
     # Sortera: Köp först, sedan Sälj, sist Neutral
-    latest_df = latest_df.sort_values(by='signal', ascending=False)
+    latest_df = latest_df.sort_values(by='pred_prob', ascending=False)
 
     # Välj kolumner att spara
     signals_out = os.path.join(PathsConfig.RESULTS_DIR, "binary_signals_today.csv")

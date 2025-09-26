@@ -26,7 +26,7 @@ def show_results():
         "Lika Viktad Portfölj": "benchmark_equal_weight_daily.csv",
         "Regression-Strategi: Köper/säljer baserat på förutsagd procentuell avkastning (2%).": "regression_daily.csv",
         "Binary-Strategi: Köper/säljer baserat på sannolikhet att överträffa index.": "binary_daily.csv",
-        #"Ranking-Strategi": "ranking_daily.csv"
+        "Ranking-Strategi": "ranking_daily.csv"
     }
 
     all_portfolios_df = pd.DataFrame()
@@ -78,12 +78,30 @@ def show_results():
     for name, percent_return in sorted_returns:
         print(f"{name+':':<25} {percent_return:+.2f}%")
 
+        # Hämta det sista värdet för varje portfölj
+    final_values = all_portfolios_df.iloc[-1].sort_values(ascending=False)
+    
+    # Skapa en ny DataFrame med kolumnerna i sorterad ordning
+    sorted_df = all_portfolios_df[final_values.index] 
+
     # Skapa grafen
-    plt.style.use('seaborn-v0_8-whitegrid') # Uppdaterad stil
+    plt.style.use('seaborn-v0_8-whitegrid')
     fig, ax = plt.subplots(figsize=(14, 8))
     
-    all_portfolios_df.plot(ax=ax, linewidth=2)
+    color_map = {
+        "Ranking-Strategi": "#7d30b0",
+        "Regression-Strategi: Köper/säljer baserat på förutsagd procentuell avkastning (2%).": "red",
+        "Binary-Strategi: Köper/säljer baserat på sannolikhet att överträffa index.": "green",
+        "OMXS30 Benchmark": "darkgrey",
+        "Lika Viktad Portfölj": "orange",
+    }
     
+    # Skapa en lista av färger i den sorterade ordningen
+    colors_to_use = [color_map[name] for name in sorted_df.columns if name in color_map]
+
+    # PLOTTA DEN SORTERADE DATAFRAMEN
+    sorted_df.plot(ax=ax, linewidth=2, color=colors_to_use)
+
     # Formatera grafen för att göra den snygg och lättläst
     ax.set_title("Jämförelse av portföljutveckling", fontsize=16)
     ax.set_ylabel("Portföljvärde (kr)", fontsize=12)
